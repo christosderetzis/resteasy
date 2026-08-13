@@ -62,12 +62,15 @@ class ClientEntityOutputStream extends EntityOutputStream {
             throw Messages.MESSAGES.streamNotClosed(this);
         }
         checkExported(Messages.MESSAGES.alreadyExported());
-        synchronized (lock) {
+        lock.lock();
+        try {
             final Path path = getFile();
             if (path != null) {
                 return new PathHttpEntity(path, contentInputStream(path));
             }
             return new ByteArrayEntity(getAndClearMemory());
+        } finally {
+            lock.unlock();
         }
     }
 

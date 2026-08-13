@@ -29,6 +29,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 import org.jboss.logging.Logger;
@@ -53,7 +55,7 @@ public class EntityOutputStream extends OutputStream {
     private static final byte[] EMPTY_BYTES = new byte[0];
     private static final int BUFFER_SIZE = Options.ENTITY_FILE_BUFFER_SIZE.getValue();
 
-    protected final Object lock = new Object();
+    protected final Lock lock = new ReentrantLock();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean exported = new AtomicBoolean();
     private final Threshold memoryThreshold;
@@ -161,16 +163,22 @@ public class EntityOutputStream extends OutputStream {
 
     @Override
     public void flush() throws IOException {
-        synchronized (lock) {
+        lock.lock();
+        try {
             delegate.flush();
+        } finally {
+            lock.unlock();
         }
     }
 
     @Override
     public void close() throws IOException {
         try {
-            synchronized (lock) {
+            lock.lock();
+            try {
                 delegate.close();
+            } finally {
+                lock.unlock();
             }
         } finally {
             closed.set(true);
@@ -198,13 +206,16 @@ public class EntityOutputStream extends OutputStream {
      */
     public InputStream toInputStream() throws IOException {
         checkExported(Messages.MESSAGES.alreadyExported());
-        synchronized (lock) {
+        lock.lock();
+        try {
             close();
             final Path file = getFile();
             if (file != null) {
                 return new EntityInputStream(file);
             }
             return new ByteArrayInputStream(getAndClearMemory());
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -253,8 +264,11 @@ public class EntityOutputStream extends OutputStream {
      * @throws IOException if there is an error determining the length of the content
      */
     public long getContentLength() throws IOException {
-        synchronized (lock) {
+        lock.lock();
+        try {
             return file == null ? inMemory.size() : Files.size(file);
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -270,7 +284,8 @@ public class EntityOutputStream extends OutputStream {
     }
 
     private OutputStream getDelegate(final int len) throws IOException {
-        synchronized (lock) {
+        lock.lock();
+        try {
             if (file != null) {
                 checkFileThreshold(len);
                 return delegate;
@@ -305,11 +320,14 @@ public class EntityOutputStream extends OutputStream {
                 throw e;
             }
             return delegate;
+        } finally {
+            lock.unlock();
         }
     }
 
     private void checkFileThreshold(final int len) {
-        synchronized (lock) {
+        lock.lock();
+        try {
             if (file != null) {
                 bytesWritten += len;
                 if (fileThreshold.reached(bytesWritten)) {
@@ -328,6 +346,8 @@ public class EntityOutputStream extends OutputStream {
                     throw Messages.MESSAGES.fileLimitReached(fileThreshold, Options.ENTITY_FILE_THRESHOLD.name());
                 }
             }
+        } finally {
+            lock.unlock();
         }
     }
 
